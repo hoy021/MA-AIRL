@@ -75,10 +75,10 @@ class Model(object):
                 step_model.append(policy(sess, ob_space[k], ac_space[k], ob_space, ac_space,
                                          nenvs, 1, nstack, reuse=False, name='%d' % k))
                 train_model.append(policy(sess, ob_space[k], ac_space[k], ob_space, ac_space,
-                                          nenvs * scale[k], nsteps, nstack, reuse=True, name='%d' % k))
+                                          nenvs * scale[k], nsteps, nstack, reuse=True, name='%d' % k)) # train_model and step_model share the parameters
             logpac = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 logits=train_model[k].pi, labels=A[k])
-            self.log_pac.append(-logpac)
+            self.log_pac.append(-logpac) # log(q) = -logpac
 
             lld.append(tf.reduce_mean(logpac))
             logits.append(train_model[k].pi)
@@ -89,7 +89,7 @@ class Model(object):
             vf_loss.append(tf.reduce_mean(mse(tf.squeeze(train_model[k].vf), R[k])))
             train_loss.append(pg_loss[k] + vf_coef * vf_loss[k])
 
-            pg_fisher_loss.append(-tf.reduce_mean(logpac))
+            pg_fisher_loss.append(-tf.reduce_mean(logpac)) 
             sample_net.append(train_model[k].vf + tf.random_normal(tf.shape(train_model[k].vf)))
             vf_fisher_loss.append(-vf_fisher_coef * tf.reduce_mean(
                 tf.pow(train_model[k].vf - tf.stop_gradient(sample_net[k]), 2)))
@@ -269,16 +269,21 @@ class Model(object):
         self.step_model = step_model
 
         def step(ob, av, *_args, **_kwargs):
-            a, v, s = [], [], []
+            a_temp, v, s = [], [], []
             obs = np.concatenate(ob, axis=1)
             for k in range(num_agents):
+                a = [multionehot(av[i], self.n_actions[i])
+                                      for i in range(num_agents) if i != k]
+                #print ("-------\n\n", np.array(multionehot(av[0], self.n_actions[0])).shape)
+                #print ("len: {} \n".format(len(a)))
                 a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
                                       for i in range(num_agents) if i != k], axis=1)
+                # print ("a_v: ", a_v)
                 a_, v_, s_ = step_model[k].step(ob[k], obs, a_v)
-                a.append(a_)
+                a_temp.append(a_)
                 v.append(v_)
                 s.append(s_)
-            return a, v, s
+            return a_temp, v, s
 
         self.step = step
 
@@ -353,8 +358,13 @@ class Runner(object):
                 mb_values[k].append(values[k])
                 mb_dones[k].append(self.dones[k])
             actions_list = []
+            
             for i in range(self.nenv):
+                #actions_list.append([actions[k][i] for k in range(self.num_agents)])
                 actions_list.append([onehot(actions[k][i], self.n_actions[k]) for k in range(self.num_agents)])
+                #print (multionehot(actions[0][i], self.n_actions[0]).shape)
+                #actions_list.append([multionehot(actions[k][i], self.n_actions[k]) for k in range(self.num_agents)])
+                                
             obs, true_rewards, dones, _ = self.env.step(actions_list)
 
             for k in range(self.num_agents):
@@ -367,6 +377,10 @@ class Runner(object):
             re_obs = self.obs
             re_actions = self.actions
             re_obs_next = obs
+            #print ("actions: {}".format(self.actions))
+            #print ("len(actions): {}".format(len(self.actions)))
+            #print ("len(actions[0]): {}".format(len(self.actions[0])))
+            #print ("len(actions[0][0]): {}".format(len(self.actions[0][0])))
             re_path_prob = self.model.get_log_action_prob_step(re_obs, re_actions)  # [num_agent, nenv, 1]
             re_actions_onehot = [multionehot(re_actions[k], self.n_actions[k]) for k in range(self.num_agents)]
 
@@ -492,6 +506,7 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
             fh.write(cloudpickle.dumps(make_model))
     model = make_model()
     if disc_type == 'decentralized' or disc_type == 'decentralized-all':
+        # each agent is associated with one discriminator 
         discriminator = [
             Discriminator(model.sess, ob_space, ac_space,
                           state_only=True, discount=gamma, nstack=nstack, index=k, disc_type=disc_type,
@@ -525,7 +540,7 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
     tstart = time.time()
     coord = tf.train.Coordinator()
     # enqueue_threads = [q_runner.create_threads(model.sess, coord=coord, start=True) for q_runner in model.q_runner]
-    for _ in range(bc_iters):
+    for _ in range(bc_iters): # bc_iters: number of expert trajectories to train on
         e_obs, e_actions, e_nobs, _, _ = expert.get_next_batch(nenvs * nsteps)
         e_a = [np.argmax(e_actions[k], axis=1) for k in range(len(e_actions))]
         lld_loss = model.clone(e_obs, e_a)
@@ -608,12 +623,12 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
                 else:
                     assert False
                 feed_dict[reward_reg_lr] = discriminator[0].lr.value()
-                model.sess.run(reward_reg_train_op, feed_dict=feed_dict)
+                model.sess.run(reward_reg_train_op, feed_dict=feed_dict) # update reward estimates
 
             idx += 1
 
         if update > update_policy_until:  # 10
-            policy_loss, value_loss, policy_entropy = model.train(obs, states, rewards, masks, actions, values)
+            policy_loss, value_loss, policy_entropy = model.train(obs, states, rewards, masks, actions, values) # update theta w.r.t. rewards 
         model.old_obs = obs
         nseconds = time.time() - tstart
         fps = int((update * nbatch) / nseconds)

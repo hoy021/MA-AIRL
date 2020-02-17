@@ -42,7 +42,7 @@ class Discriminator(object):
 
         if disc_type == 'decentralized':
             self.obs = tf.placeholder(tf.float32, (None, self.ob_shape))
-            self.nobs = tf.placeholder(tf.float32, (None, self.ob_shape))
+            self.nobs = tf.placeholder(tf.float32, (None, self.ob_shape)) # next obs
             self.act = tf.placeholder(tf.float32, (None, self.ac_shape))
             self.labels = tf.placeholder(tf.float32, (None, 1))
             self.lprobs = tf.placeholder(tf.float32, (None, 1))
@@ -62,6 +62,7 @@ class Discriminator(object):
             if not self.state_only:
                 rew_input = tf.concat([self.obs, self.act], axis=1)
 
+            # reward estimator 
             with tf.variable_scope('reward'):
                 self.reward = self.relu_net(rew_input, dout=1)
                 # self.reward = self.tanh_net(rew_input, dout=1)
@@ -73,12 +74,15 @@ class Discriminator(object):
                 self.value_fn = self.relu_net(self.obs, dout=1)
                 # self.value_fn = self.tanh_net(self.obs, dout=1)
 
-            log_q_tau = self.lprobs
-            log_p_tau = self.reward + self.gamma * self.value_fn_n - self.value_fn
-            log_pq = tf.reduce_logsumexp([log_p_tau, log_q_tau], axis=0)
-            self.discrim_output = tf.exp(log_p_tau - log_pq)
+            log_q_tau = self.lprobs # log(q) 
+            # **************************
+            # reward shaping ambiguity
+            # **************************
+            log_p_tau = self.reward + self.gamma * self.value_fn_n - self.value_fn # f
+            log_pq = tf.reduce_logsumexp([log_p_tau, log_q_tau], axis=0) # log(exp(f) + exp(log(q))) = f * log(q)
+            self.discrim_output = tf.exp(log_p_tau - log_pq) # exp(f - f * log(q)) = exp(f) / exp(f * log(q)) = exp(f) / exp(log(exp(f) + q)) = exp(f) / (exp(f) + q)
 
-        self.total_loss = -tf.reduce_mean(self.labels * (log_p_tau - log_pq) + (1 - self.labels) * (log_q_tau - log_pq))
+        self.total_loss = -tf.reduce_mean(self.labels * (log_p_tau - log_pq) + (1 - self.labels) * (log_q_tau - log_pq)) # discriminator loss; equation 11 in paper
         self.var_list = self.get_trainable_variables()
         params = find_trainable_variables(self.scope)
         self.l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in params]) * self.l2_loss_ratio

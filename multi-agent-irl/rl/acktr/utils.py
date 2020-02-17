@@ -198,15 +198,21 @@ class EpisodeStats:
         else:
             return 0
 
-
+from collections.abc import Iterable
 def onehot(value, depth):
-    a = np.zeros([depth])
-    a[value] = 1
+    if isinstance(value, Iterable):
+        a = [int(i) for i in value]
+    else:
+        t = int(value)
+        a = np.zeros([depth])
+        a[t] = 1
     return a
 
 
 def multionehot(values, depth):
+    #print ("in multionehot: ", values, depth)
     a = np.zeros([values.shape[0], depth])
     for i in range(values.shape[0]):
         a[i, int(values[i])] = 1
+    #print ("in multionehot a: ", a)
     return a
