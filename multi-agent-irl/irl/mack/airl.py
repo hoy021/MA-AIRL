@@ -16,11 +16,16 @@ from irl.mack.kfac_discriminator_airl import Discriminator
 # from irl.mack.kfac_discriminator_wgan import Discriminator
 from irl.dataset import Dset
 
+from random import randrange, uniform
+
 
 class Model(object):
     def __init__(self, policy, ob_space, ac_space, nenvs, total_timesteps, nprocs=2, nsteps=200,
                  nstack=1, ent_coef=0.00, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
-                 kfac_clip=0.001, lrschedule='linear', identical=None):
+                 kfac_clip=0.001, lrschedule='linear', identical=None,
+                fake_ac_prob = 0.99):
+        self.fake_ac_prob = fake_ac_prob
+        
         config = tf.ConfigProto(allow_soft_placement=True,
                                 intra_op_parallelism_threads=nprocs,
                                 inter_op_parallelism_threads=nprocs)
@@ -31,6 +36,8 @@ class Model(object):
         self.n_actions = [ac_space[k].n for k in range(self.num_agents)]
         if identical is None:
             identical = [False for _ in range(self.num_agents)]
+            
+        print ("airl line 40, num_agents: ", num_agents, identical)
 
         scale = [1 for _ in range(num_agents)]
         pointer = [i for i in range(num_agents)]
@@ -178,9 +185,15 @@ class Model(object):
                 new_map = {}
                 if num_agents > 1:
                     action_v = []
-                    for j in range(k, pointer[k]):
-                        action_v.append(np.concatenate([multionehot(actions[i], self.n_actions[i])
-                                                   for i in range(num_agents) if i != k], axis=1))
+                    if uniform(0, 1) < self.fake_ac_prob:
+                        for j in range(k, pointer[k]):
+                            action_v.append(np.concatenate([multionehot(np.array([randrange(0, self.n_actions[i]) for _ in range(actions[i].shape[0])]), self.n_actions[i])
+                                                       for i in range(num_agents) if i != k], axis=1))
+                        print ("airl line 190 action_v.shape: ", np.array(action_v).shape)
+                    else:
+                        for j in range(k, pointer[k]):
+                            action_v.append(np.concatenate([multionehot(actions[i], self.n_actions[i])
+                                                       for i in range(num_agents) if i != k], axis=1))
                     action_v = np.concatenate(action_v, axis=0)
                     new_map.update({train_model[k].A_v: action_v})
                     td_map.update({train_model[k].A_v: action_v})
@@ -577,6 +590,8 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
 
             e_a = [np.argmax(e_actions[k], axis=1) for k in range(len(e_actions))]
             g_a = [np.argmax(g_actions[k], axis=1) for k in range(len(g_actions))]
+            
+            print ("airl line 592, e_obs.shape: ", np.array(e_actions).shape, " g_obs.shape: ", np.array(g_actions).shape)
 
             g_log_prob = model.get_log_action_prob(g_obs, g_a)
             e_log_prob = model.get_log_action_prob(e_obs, e_a)

@@ -49,7 +49,7 @@ def get_identical(env_id):
     if env_id == 'simple_adversary':
         return [False, False, True]
     elif env_id == 'simple_spread':
-        return [False, True, True]
+        return [False, True, True, True, True, True, True, True, True, True]
     elif env_id == 'simple_tag':
         return [False, True, True, False]
     else:
